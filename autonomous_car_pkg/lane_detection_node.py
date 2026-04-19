@@ -171,6 +171,7 @@ class LaneDetectionNode(Node):
         final_error = max(-1.5, min(1.5, final_error))
 
         # 5. Detect end-of-road orange line — require significant pixel coverage
+        orange_cnt = self._largest_contour(orange_mask)
         orange_pixels = int(cv2.countNonZero(orange_mask))
         min_orange = self.get_parameter('min_orange_pixels').value
         end_of_road = orange_pixels >= min_orange
