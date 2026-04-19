@@ -61,8 +61,10 @@ ORANGE_HSV_HIGH = (15, 255, 255)
 MIN_CONTOUR_AREA = 2500
 
 # How far from the right edge (0–1) the white line centroid should sit
-# 0.15 means "white line should be at 85 % of image width from left"
 TARGET_WHITE_X_RATIO = 0.20
+
+# How far from the left edge (0–1) the yellow line centroid should sit
+TARGET_YELLOW_X_RATIO = 0.20
 
 
 class LaneDetectionNode(Node):
@@ -78,8 +80,9 @@ class LaneDetectionNode(Node):
         self.declare_parameter('yellow_h_max', int(YELLOW_HSV_HIGH[0]))
         self.declare_parameter('orange_h_min', int(ORANGE_HSV_LOW[0]))
         self.declare_parameter('orange_h_max', int(ORANGE_HSV_HIGH[0]))
-        self.declare_parameter('crop_top_ratio', 0.5)   # ignore top 50 %
-        self.declare_parameter('crop_bottom_ratio', 0.1)# ignore bottom 10 %
+        self.declare_parameter('crop_top_ratio', 0.5)
+        self.declare_parameter('crop_bottom_ratio', 0.1)
+        self.declare_parameter('yellow_target_x_ratio', TARGET_YELLOW_X_RATIO)
         self.declare_parameter('debug_image', True)
 
         # ── Subscribers ──────────────────────────────────────────
@@ -126,31 +129,50 @@ class LaneDetectionNode(Node):
         yellow_mask = self._yellow_mask(hsv)
         orange_mask = self._orange_mask(hsv)
 
-        # 4. Detect white line centroid → compute lateral error
-        error = 0.0
+        # 4. Detect white line centroid → primary lateral error
+        white_error = 0.0
         white_cx = None
         white_cnt = self._largest_contour(white_mask)
         if white_cnt is not None:
             M = cv2.moments(white_cnt)
             if M['m00'] > 0:
                 white_cx = int(M['m10'] / M['m00'])
-                target_x = int(w * (1.0 - TARGET_WHITE_X_RATIO))
-                # Normalise error to [-1, 1] range
-                error = (white_cx - target_x) / float(w / 2)
+                target_white_x = int(w * (1.0 - TARGET_WHITE_X_RATIO))
+                white_error = (white_cx - target_white_x) / float(w / 2)
+
+        # 4b. Detect yellow line centroid → fallback lateral error
+        yellow_error = 0.0
+        yellow_cx = None
+        yellow_cnt = self._largest_contour(yellow_mask)
+        if yellow_cnt is not None:
+            M = cv2.moments(yellow_cnt)
+            if M['m00'] > 0:
+                yellow_cx = int(M['m10'] / M['m00'])
+                target_yellow_x = int(w * self.get_parameter('yellow_target_x_ratio').value)
+                yellow_error = (yellow_cx - target_yellow_x) / float(w / 2)
+
+        # White has priority; yellow is fallback when white not visible
+        if white_cnt is not None:
+            final_error = white_error
+        elif yellow_cnt is not None:
+            final_error = yellow_error
+        else:
+            final_error = 0.0
 
         # 5. Detect end-of-road orange line
         orange_cnt = self._largest_contour(orange_mask)
         end_of_road = orange_cnt is not None
 
         # 6. Publish
-        self.pub_error.publish(Float32(data=float(error)))
+        self.pub_error.publish(Float32(data=float(final_error)))
         self.pub_eor.publish(Bool(data=end_of_road))
-        self._publish_markers(w, roi_y, white_cnt, yellow_mask, orange_cnt)
+        self._publish_markers(w, roi_y, white_cnt, yellow_cnt, orange_cnt)
 
         # 7. Debug image
         if self.get_parameter('debug_image').value:
             self._publish_debug(roi, white_mask, yellow_mask, orange_mask,
-                                white_cx, w, roi_y)
+                                white_cx, yellow_cx, w, roi_y,
+                                white_cnt is not None)
 
     # ── Colour masks ──────────────────────────────────────────────
     def _white_mask(self, hsv):
@@ -194,11 +216,11 @@ class LaneDetectionNode(Node):
 
     # ── Marker publisher (for RViz) ───────────────────────────────
     def _publish_markers(self, img_w, roi_y_offset, white_cnt,
-                          yellow_mask, orange_cnt):
+                          yellow_cnt, orange_cnt):
         arr = MarkerArray()
         stamp = self.get_clock().now().to_msg()
 
-        def make_marker(mid, r, g, b, label):
+        def make_marker(mid, r, g, b):
             m = Marker()
             m.header.frame_id = 'base_link'
             m.header.stamp = stamp
@@ -214,15 +236,24 @@ class LaneDetectionNode(Node):
             M = cv2.moments(white_cnt)
             if M['m00'] > 0:
                 cx = int(M['m10'] / M['m00'])
-                m = make_marker(0, 1.0, 1.0, 1.0, 'white')
-                # Convert pixel → rough metric (camera ~0.3 m above ground)
+                m = make_marker(0, 1.0, 1.0, 1.0)
+                m.pose.position.x = 0.3
+                m.pose.position.y = (img_w / 2 - cx) * 0.001
+                m.pose.position.z = 0.0
+                arr.markers.append(m)
+
+        if yellow_cnt is not None:
+            M = cv2.moments(yellow_cnt)
+            if M['m00'] > 0:
+                cx = int(M['m10'] / M['m00'])
+                m = make_marker(1, 1.0, 1.0, 0.0)
                 m.pose.position.x = 0.3
                 m.pose.position.y = (img_w / 2 - cx) * 0.001
                 m.pose.position.z = 0.0
                 arr.markers.append(m)
 
         if orange_cnt is not None:
-            m = make_marker(2, 1.0, 0.5, 0.0, 'orange')
+            m = make_marker(2, 1.0, 0.5, 0.0)
             m.pose.position.x = 0.2
             m.pose.position.y = 0.0
             m.pose.position.z = 0.0
@@ -232,24 +263,38 @@ class LaneDetectionNode(Node):
 
     # ── Debug image ───────────────────────────────────────────────
     def _publish_debug(self, roi, white_mask, yellow_mask, orange_mask,
-                        white_cx, img_w, roi_y):
+                        white_cx, yellow_cx, img_w, roi_y, white_active):
         debug = roi.copy()
-        # Colour overlays
-        debug[white_mask  > 0] = (200, 200, 255)
-        debug[yellow_mask > 0] = (0,   220, 220)
-        debug[orange_mask > 0] = (0,   120, 255)
+        debug[white_mask  > 0] = (200, 200, 255)   # blue tint
+        debug[yellow_mask > 0] = (0,   220, 220)   # yellow tint
+        debug[orange_mask > 0] = (0,   120, 255)   # orange tint
 
-        # Target X line
-        target_x = int(img_w * (1.0 - TARGET_WHITE_X_RATIO))
-                
-        cv2.line(debug, (target_x, 0), (target_x, debug.shape[0]),
+        # White target line (green)
+        target_white_x = int(img_w * (1.0 - TARGET_WHITE_X_RATIO))
+        cv2.line(debug, (target_white_x, 0), (target_white_x, debug.shape[0]),
                  (0, 255, 0), 1)
 
+        # Yellow target line (dark green, dashed feel via thinner line)
+        target_yellow_x = int(img_w * self.get_parameter('yellow_target_x_ratio').value)
+        cv2.line(debug, (target_yellow_x, 0), (target_yellow_x, debug.shape[0]),
+                 (0, 180, 0), 1)
 
-        # Detected white line position
+        # Detected white centroid (cyan) — thicker when active source
         if white_cx is not None:
+            thickness = 3 if white_active else 1
             cv2.line(debug, (white_cx, 0), (white_cx, debug.shape[0]),
-                     (255, 255, 0), 2)
+                     (255, 255, 0), thickness)
+
+        # Detected yellow centroid (magenta) — thicker when active source
+        if yellow_cx is not None:
+            thickness = 3 if not white_active else 1
+            cv2.line(debug, (yellow_cx, 0), (yellow_cx, debug.shape[0]),
+                     (255, 0, 255), thickness)
+
+        # Source label
+        label = 'SRC: WHITE' if white_active else ('SRC: YELLOW' if yellow_cx is not None else 'SRC: NONE')
+        cv2.putText(debug, label, (5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                    (0, 255, 255), 1, cv2.LINE_AA)
 
         msg = self.bridge.cv2_to_imgmsg(debug, encoding='bgr8')
         self.pub_debug.publish(msg)
