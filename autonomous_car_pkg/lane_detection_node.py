@@ -84,6 +84,8 @@ class LaneDetectionNode(Node):
         self.declare_parameter('crop_bottom_ratio', 0.1)
         self.declare_parameter('yellow_target_x_ratio', TARGET_YELLOW_X_RATIO)
         self.declare_parameter('yellow_weight', 0.5)   # blend when both visible [0=white only, 1=yellow only]
+        self.declare_parameter('right_bias', 0.3)      # bias applied when only yellow visible (pushes right)
+        self.declare_parameter('min_orange_pixels', 8000)  # minimum orange pixels to trigger end-of-road
         self.declare_parameter('debug_image', True)
 
         # ── Subscribers ──────────────────────────────────────────
@@ -159,13 +161,19 @@ class LaneDetectionNode(Node):
         elif white_cnt is not None:
             final_error = white_error
         elif yellow_cnt is not None:
-            final_error = yellow_error
+            # No white line (e.g. right fork) → follow yellow but bias right
+            bias = self.get_parameter('right_bias').value
+            final_error = yellow_error + bias
         else:
             final_error = 0.0
 
-        # 5. Detect end-of-road orange line
-        orange_cnt = self._largest_contour(orange_mask)
-        end_of_road = orange_cnt is not None
+        # Clamp to [-1.5, 1.5] so bias doesn't saturate the controller
+        final_error = max(-1.5, min(1.5, final_error))
+
+        # 5. Detect end-of-road orange line — require significant pixel coverage
+        orange_pixels = int(cv2.countNonZero(orange_mask))
+        min_orange = self.get_parameter('min_orange_pixels').value
+        end_of_road = orange_pixels >= min_orange
 
         # 6. Publish
         self.pub_error.publish(Float32(data=float(final_error)))
@@ -176,7 +184,7 @@ class LaneDetectionNode(Node):
         if self.get_parameter('debug_image').value:
             self._publish_debug(roi, white_mask, yellow_mask, orange_mask,
                                 white_cx, yellow_cx, w, roi_y,
-                                white_cnt is not None)
+                                white_cnt is not None, orange_pixels)
 
     # ── Colour masks ──────────────────────────────────────────────
     def _white_mask(self, hsv):
@@ -267,7 +275,7 @@ class LaneDetectionNode(Node):
 
     # ── Debug image ───────────────────────────────────────────────
     def _publish_debug(self, roi, white_mask, yellow_mask, orange_mask,
-                        white_cx, yellow_cx, img_w, roi_y, white_active):
+                        white_cx, yellow_cx, img_w, roi_y, white_active, orange_pixels=0):
         debug = roi.copy()
         debug[white_mask  > 0] = (200, 200, 255)   # blue tint
         debug[yellow_mask > 0] = (0,   220, 220)   # yellow tint
@@ -301,11 +309,17 @@ class LaneDetectionNode(Node):
         elif white_cx is not None:
             label = 'SRC: WHITE'
         elif yellow_cx is not None:
-            label = 'SRC: YELLOW'
+            label = 'SRC: YELLOW+BIAS'
         else:
             label = 'SRC: NONE'
         cv2.putText(debug, label, (5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                     (0, 255, 255), 1, cv2.LINE_AA)
+
+        # Orange pixel counter (helps calibrate min_orange_pixels)
+        min_px = self.get_parameter('min_orange_pixels').value
+        color = (0, 80, 255) if orange_pixels >= min_px else (180, 180, 180)
+        cv2.putText(debug, f'ORANGE: {orange_pixels}px', (5, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
 
         msg = self.bridge.cv2_to_imgmsg(debug, encoding='bgr8')
         self.pub_debug.publish(msg)
