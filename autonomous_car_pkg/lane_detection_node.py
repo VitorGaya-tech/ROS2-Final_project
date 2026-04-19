@@ -48,7 +48,7 @@ from cv_bridge import CvBridge
 # ──────────────────────────────────────────────────────────────────
 #  Default HSV thresholds  (tune via ROS parameters)
 # ──────────────────────────────────────────────────────────────────
-WHITE_HSV_LOW  = (0,   0,  210)
+WHITE_HSV_LOW  = (0,   0,  220)
 WHITE_HSV_HIGH = (180, 30, 255)
 
 YELLOW_HSV_LOW  = (25,  100, 120)
@@ -157,7 +157,7 @@ class LaneDetectionNode(Node):
         h_min = self.get_parameter('white_h_min').value
         s_max = self.get_parameter('white_s_max').value
         v_min = self.get_parameter('white_v_min').value
-        lo = np.array([h_min, 0,     v_min])
+        lo = np.array([h_min, 10,     v_min])
         hi = np.array([180,   s_max, 255])
         mask = cv2.inRange(hsv, lo, hi)
         return cv2.morphologyEx(mask, cv2.MORPH_OPEN,
