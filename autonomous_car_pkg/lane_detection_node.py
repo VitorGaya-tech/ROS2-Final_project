@@ -83,6 +83,7 @@ class LaneDetectionNode(Node):
         self.declare_parameter('crop_top_ratio', 0.5)
         self.declare_parameter('crop_bottom_ratio', 0.1)
         self.declare_parameter('yellow_target_x_ratio', TARGET_YELLOW_X_RATIO)
+        self.declare_parameter('yellow_weight', 0.5)   # blend when both visible [0=white only, 1=yellow only]
         self.declare_parameter('debug_image', True)
 
         # ── Subscribers ──────────────────────────────────────────
@@ -151,8 +152,11 @@ class LaneDetectionNode(Node):
                 target_yellow_x = int(w * self.get_parameter('yellow_target_x_ratio').value)
                 yellow_error = (yellow_cx - target_yellow_x) / float(w / 2)
 
-        # White has priority; yellow is fallback when white not visible
-        if white_cnt is not None:
+        # Both visible → weighted blend; one missing → use what's available
+        yw = self.get_parameter('yellow_weight').value
+        if white_cnt is not None and yellow_cnt is not None:
+            final_error = (1.0 - yw) * white_error + yw * yellow_error
+        elif white_cnt is not None:
             final_error = white_error
         elif yellow_cnt is not None:
             final_error = yellow_error
@@ -292,7 +296,14 @@ class LaneDetectionNode(Node):
                      (255, 0, 255), thickness)
 
         # Source label
-        label = 'SRC: WHITE' if white_active else ('SRC: YELLOW' if yellow_cx is not None else 'SRC: NONE')
+        if white_cx is not None and yellow_cx is not None:
+            label = 'SRC: BLEND'
+        elif white_cx is not None:
+            label = 'SRC: WHITE'
+        elif yellow_cx is not None:
+            label = 'SRC: YELLOW'
+        else:
+            label = 'SRC: NONE'
         cv2.putText(debug, label, (5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                     (0, 255, 255), 1, cv2.LINE_AA)
 
