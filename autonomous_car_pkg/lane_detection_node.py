@@ -83,10 +83,15 @@ class LaneDetectionNode(Node):
         self.declare_parameter('crop_top_ratio', 0.5)
         self.declare_parameter('crop_bottom_ratio', 0.1)
         self.declare_parameter('yellow_target_x_ratio', TARGET_YELLOW_X_RATIO)
-        self.declare_parameter('yellow_weight', 0.5)   # blend when both visible [0=white only, 1=yellow only]
-        self.declare_parameter('right_bias', 0.3)      # bias applied when only yellow visible (pushes right)
-        self.declare_parameter('min_orange_pixels', 8000)  # minimum orange pixels to trigger end-of-road
+        self.declare_parameter('yellow_weight', 0.5)
+        self.declare_parameter('right_bias', 0.3)
+        self.declare_parameter('yellow_memory_secs', 0.5)  # how long to hold last yellow position
+        self.declare_parameter('min_orange_pixels', 8000)
         self.declare_parameter('debug_image', True)
+
+        # ── Yellow line memory (dashed line compensation) ─────────
+        self.last_yellow_cx    = None
+        self.last_yellow_stamp = 0.0
 
         # ── Subscribers ──────────────────────────────────────────
         self.sub_img = self.create_subscription(
@@ -96,10 +101,11 @@ class LaneDetectionNode(Node):
             10)
 
         # ── Publishers ───────────────────────────────────────────
-        self.pub_error   = self.create_publisher(Float32,      '/lane/error',       10)
-        self.pub_eor     = self.create_publisher(Bool,         '/lane/end_of_road', 10)
-        self.pub_markers = self.create_publisher(MarkerArray,  '/lane/markers',     10)
-        self.pub_debug   = self.create_publisher(Image,        '/lane/debug_image', 10)
+        self.pub_error     = self.create_publisher(Float32,      '/lane/error',          10)
+        self.pub_eor       = self.create_publisher(Bool,         '/lane/end_of_road',    10)
+        self.pub_white_det = self.create_publisher(Bool,         '/lane/white_detected', 10)
+        self.pub_markers   = self.create_publisher(MarkerArray,  '/lane/markers',        10)
+        self.pub_debug     = self.create_publisher(Image,        '/lane/debug_image',    10)
 
         self.bridge = CvBridge()
         self.get_logger().info('Lane detection node started.')
@@ -144,48 +150,66 @@ class LaneDetectionNode(Node):
                 white_error = (white_cx - target_white_x) / float(w / 2)
 
         # 4b. Detect yellow line centroid → fallback lateral error
-        yellow_error = 0.0
-        yellow_cx = None
+        yellow_error      = 0.0
+        yellow_cx         = None
+        yellow_available  = False
+        yellow_from_memory = False
+
+        now_sec   = self.get_clock().now().nanoseconds * 1e-9
         yellow_cnt = self._largest_contour(yellow_mask)
+
         if yellow_cnt is not None:
             M = cv2.moments(yellow_cnt)
             if M['m00'] > 0:
                 yellow_cx = int(M['m10'] / M['m00'])
                 target_yellow_x = int(w * self.get_parameter('yellow_target_x_ratio').value)
                 yellow_error = (yellow_cx - target_yellow_x) / float(w / 2)
+                self.last_yellow_cx    = yellow_cx
+                self.last_yellow_stamp = now_sec
+                yellow_available = True
+        else:
+            # Dashed line: use last known position if recent enough
+            memory_secs = self.get_parameter('yellow_memory_secs').value
+            if (self.last_yellow_cx is not None and
+                    (now_sec - self.last_yellow_stamp) < memory_secs):
+                yellow_cx = self.last_yellow_cx
+                target_yellow_x = int(w * self.get_parameter('yellow_target_x_ratio').value)
+                yellow_error = (yellow_cx - target_yellow_x) / float(w / 2)
+                yellow_available  = True
+                yellow_from_memory = True
 
         # Both visible → weighted blend; one missing → use what's available
+        white_available = white_cnt is not None
         yw = self.get_parameter('yellow_weight').value
-        if white_cnt is not None and yellow_cnt is not None:
+        if white_available and yellow_available:
             final_error = (1.0 - yw) * white_error + yw * yellow_error
-        elif white_cnt is not None:
+        elif white_available:
             final_error = white_error
-        elif yellow_cnt is not None:
-            # No white line (e.g. right fork) → follow yellow but bias right
+        elif yellow_available:
             bias = self.get_parameter('right_bias').value
             final_error = yellow_error + bias
         else:
             final_error = 0.0
 
-        # Clamp to [-1.5, 1.5] so bias doesn't saturate the controller
         final_error = max(-1.5, min(1.5, final_error))
 
         # 5. Detect end-of-road orange line — require significant pixel coverage
-        orange_cnt = self._largest_contour(orange_mask)
+        orange_cnt    = self._largest_contour(orange_mask)
         orange_pixels = int(cv2.countNonZero(orange_mask))
-        min_orange = self.get_parameter('min_orange_pixels').value
-        end_of_road = orange_pixels >= min_orange
+        min_orange    = self.get_parameter('min_orange_pixels').value
+        end_of_road   = orange_pixels >= min_orange
 
         # 6. Publish
         self.pub_error.publish(Float32(data=float(final_error)))
         self.pub_eor.publish(Bool(data=end_of_road))
+        self.pub_white_det.publish(Bool(data=white_available))
         self._publish_markers(w, roi_y, white_cnt, yellow_cnt, orange_cnt)
 
         # 7. Debug image
         if self.get_parameter('debug_image').value:
             self._publish_debug(roi, white_mask, yellow_mask, orange_mask,
                                 white_cx, yellow_cx, w, roi_y,
-                                white_cnt is not None, orange_pixels)
+                                white_available, orange_pixels, yellow_from_memory)
 
     # ── Colour masks ──────────────────────────────────────────────
     def _white_mask(self, hsv):
@@ -276,49 +300,41 @@ class LaneDetectionNode(Node):
 
     # ── Debug image ───────────────────────────────────────────────
     def _publish_debug(self, roi, white_mask, yellow_mask, orange_mask,
-                        white_cx, yellow_cx, img_w, roi_y, white_active, orange_pixels=0):
+                        white_cx, yellow_cx, img_w, roi_y, white_active,
+                        orange_pixels=0, yellow_from_memory=False):
         debug = roi.copy()
-        debug[white_mask  > 0] = (200, 200, 255)   # blue tint
-        debug[yellow_mask > 0] = (0,   220, 220)   # yellow tint
-        debug[orange_mask > 0] = (0,   120, 255)   # orange tint
+        debug[white_mask  > 0] = (200, 200, 255)
+        debug[yellow_mask > 0] = (0,   220, 220)
+        debug[orange_mask > 0] = (0,   120, 255)
 
-        # White target line (green)
         target_white_x = int(img_w * (1.0 - TARGET_WHITE_X_RATIO))
-        cv2.line(debug, (target_white_x, 0), (target_white_x, debug.shape[0]),
-                 (0, 255, 0), 1)
+        cv2.line(debug, (target_white_x, 0), (target_white_x, debug.shape[0]), (0, 255, 0), 1)
 
-        # Yellow target line (dark green, dashed feel via thinner line)
         target_yellow_x = int(img_w * self.get_parameter('yellow_target_x_ratio').value)
-        cv2.line(debug, (target_yellow_x, 0), (target_yellow_x, debug.shape[0]),
-                 (0, 180, 0), 1)
+        cv2.line(debug, (target_yellow_x, 0), (target_yellow_x, debug.shape[0]), (0, 180, 0), 1)
 
-        # Detected white centroid (cyan) — thicker when active source
         if white_cx is not None:
-            thickness = 3 if white_active else 1
             cv2.line(debug, (white_cx, 0), (white_cx, debug.shape[0]),
-                     (255, 255, 0), thickness)
+                     (255, 255, 0), 3 if white_active else 1)
 
-        # Detected yellow centroid (magenta) — thicker when active source
         if yellow_cx is not None:
-            thickness = 3 if not white_active else 1
+            # Dim color when position comes from memory
+            color = (180, 0, 180) if yellow_from_memory else (255, 0, 255)
             cv2.line(debug, (yellow_cx, 0), (yellow_cx, debug.shape[0]),
-                     (255, 0, 255), thickness)
+                     color, 3 if not white_active else 1)
 
-        # Source label
         if white_cx is not None and yellow_cx is not None:
             label = 'SRC: BLEND'
         elif white_cx is not None:
             label = 'SRC: WHITE'
         elif yellow_cx is not None:
-            label = 'SRC: YELLOW+BIAS'
+            label = 'SRC: YEL+BIAS (MEM)' if yellow_from_memory else 'SRC: YEL+BIAS'
         else:
             label = 'SRC: NONE'
-        cv2.putText(debug, label, (5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                    (0, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(debug, label, (5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA)
 
-        # Orange pixel counter (helps calibrate min_orange_pixels)
         min_px = self.get_parameter('min_orange_pixels').value
-        color = (0, 80, 255) if orange_pixels >= min_px else (180, 180, 180)
+        color  = (0, 80, 255) if orange_pixels >= min_px else (180, 180, 180)
         cv2.putText(debug, f'ORANGE: {orange_pixels}px', (5, 40),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
 

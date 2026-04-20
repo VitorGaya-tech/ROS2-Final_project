@@ -47,6 +47,10 @@ DEFAULT_MAX_TURN  = 1.2    # rad/s maximum angular velocity
 RIGHT_TURN_DURATION    = 2.2   # timed right turn at intersection
 TURNAROUND_DURATION    = 3.5   # 180° spin (~π / ω  where ω≈0.9)
 TURNAROUND_SPEED       = 0.9   # rad/s for 180° spin
+FORK_RIGHT_TIMEOUT     = 4.0   # max seconds seeking right fork before giving up
+RECOVERY_DURATION      = 2.0   # seconds of post-turnaround realignment
+RECOVERY_ANGULAR       = 0.4   # rad/s left curve during LANE_RECOVERY
+WHITE_ABSENT_THRESH    = 15    # control cycles (~0.75 s) without white → FORK_RIGHT
 
 
 class NavigationNode(Node):
@@ -61,17 +65,21 @@ class NavigationNode(Node):
         self.declare_parameter('max_turn',   DEFAULT_MAX_TURN)
 
         # ── State ─────────────────────────────────────────────────
-        self.state = 'FOLLOWING'       # FOLLOWING | TURNING_RIGHT | TURNING_AROUND | STOPPED
+        self.state = 'FOLLOWING'
         self.manoeuvre_start = None
         self.last_error = 0.0
         self.last_error_time = time.time()
         self.current_error = 0.0
         self.external_override = 'NONE'
 
+        self.white_detected      = True   # from /lane/white_detected
+        self.white_absent_cycles = 0      # consecutive cycles without white line
+
         # ── Subscribers ───────────────────────────────────────────
-        self.create_subscription(Float32, '/lane/error',       self._error_cb,    10)
-        self.create_subscription(Bool,    '/lane/end_of_road', self._eor_cb,      10)
-        self.create_subscription(String,  '/behavior/state',   self._behavior_cb, 10)
+        self.create_subscription(Float32, '/lane/error',          self._error_cb,     10)
+        self.create_subscription(Bool,    '/lane/end_of_road',    self._eor_cb,       10)
+        self.create_subscription(Bool,    '/lane/white_detected', self._white_det_cb, 10)
+        self.create_subscription(String,  '/behavior/state',      self._behavior_cb,  10)
 
         # ── Publisher ─────────────────────────────────────────────
         self.pub_cmd = self.create_publisher(Twist, '/cmd_vel', 10)
@@ -84,6 +92,9 @@ class NavigationNode(Node):
     # ── Callbacks ─────────────────────────────────────────────────
     def _error_cb(self, msg: Float32):
         self.current_error = msg.data
+
+    def _white_det_cb(self, msg: Bool):
+        self.white_detected = msg.data
 
     def _eor_cb(self, msg: Bool):
         if msg.data and self.state == 'FOLLOWING':
@@ -125,12 +136,51 @@ class NavigationNode(Node):
                 cmd.linear.x  = 0.0
                 cmd.angular.z = TURNAROUND_SPEED
             else:
-                self.get_logger().info('Turnaround done → FOLLOWING')
+                self.get_logger().info('Turnaround done → LANE_RECOVERY')
+                self._start_manoeuvre('LANE_RECOVERY')
+            self.pub_cmd.publish(cmd)
+            return
+
+        if self.state == 'LANE_RECOVERY':
+            # After 180° turn white line is on the wrong side; drive forward
+            # with a left curve until the robot finds the lane again.
+            elapsed = time.time() - self.manoeuvre_start
+            if elapsed < RECOVERY_DURATION:
+                cmd.linear.x  = self.get_parameter('base_speed').value * 0.5
+                cmd.angular.z = RECOVERY_ANGULAR
+            else:
+                self.get_logger().info('Lane recovery done → FOLLOWING')
                 self.state = 'FOLLOWING'
+                self.white_absent_cycles = 0
+            self.pub_cmd.publish(cmd)
+            return
+
+        if self.state == 'FORK_RIGHT':
+            # White line disappeared at a fork — turn right until it reappears
+            elapsed = time.time() - self.manoeuvre_start
+            if self.white_detected or elapsed > FORK_RIGHT_TIMEOUT:
+                self.get_logger().info('Fork resolved → FOLLOWING')
+                self.state = 'FOLLOWING'
+                self.white_absent_cycles = 0
+                return
+            cmd.linear.x  = self.get_parameter('base_speed').value * 0.5
+            cmd.angular.z = -self.get_parameter('max_turn').value * 0.6
             self.pub_cmd.publish(cmd)
             return
 
         # ── FOLLOWING: PD controller ──────────────────────────────
+        # Track white line absence to detect right fork
+        if not self.white_detected:
+            self.white_absent_cycles += 1
+        else:
+            self.white_absent_cycles = 0
+
+        if self.white_absent_cycles >= WHITE_ABSENT_THRESH:
+            self.get_logger().info('White absent → FORK_RIGHT')
+            self.white_absent_cycles = 0
+            self._start_manoeuvre('FORK_RIGHT')
+            return
+
         kp = self.get_parameter('kp').value
         kd = self.get_parameter('kd').value
         base_speed = self.get_parameter('base_speed').value
