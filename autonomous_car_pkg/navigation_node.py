@@ -50,7 +50,7 @@ TURNAROUND_SPEED       = 0.9   # rad/s for 180° spin
 FORK_RIGHT_TIMEOUT     = 4.0   # max seconds seeking right fork before giving up
 RECOVERY_DURATION      = 2.0   # seconds of post-turnaround realignment
 RECOVERY_ANGULAR       = 0.4   # rad/s left curve during LANE_RECOVERY
-WHITE_ABSENT_THRESH    = 5    # control cycles (~0.75 s) without white → FORK_RIGHT
+WHITE_ABSENT_THRESH    = 15     # control cycles (~0.75 s at 20 Hz) without white → FORK_RIGHT
 
 
 class NavigationNode(Node):
