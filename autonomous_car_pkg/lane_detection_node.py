@@ -113,6 +113,7 @@ class LaneDetectionNode(Node):
         self.get_logger().info('Lane detection node started.')
 
     # ── Main callback ─────────────────────────────────────────────
+    # ── Main callback ─────────────────────────────────────────────
     def image_callback(self, msg: Image):
         try:
             frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
@@ -121,39 +122,20 @@ class LaneDetectionNode(Node):
             return
         
         h, w = frame.shape[:2]
-        """
-        # 1. Crop ROI
-        crop_top    = self.get_parameter('crop_top_ratio').value
-        crop_bottom = self.get_parameter('crop_bottom_ratio').value
-        crop_left   = self.get_parameter('crop_left_ratio').value
 
-        roi_y      = int(h * crop_top)
-        roi_y_bot  = int(h * (1.0 - crop_bottom))
-        roi_x      = int(w * crop_left)
-
-        roi = frame[roi_y:roi_y_bot, roi_x:w]
-        w = roi.shape[1]   # update w so all centroid calculations stay correct
-
-        # 2. Convert to HSV
-        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-
-        # 3. Build masks
-        white_mask  = self._white_mask(hsv)
-        yellow_mask = self._yellow_mask(hsv)
-        orange_mask = self._orange_mask(hsv)
-        """
         # 1. Parâmetros de Crop Desacoplados
         crop_top_lanes  = self.get_parameter('crop_top_ratio').value
         crop_top_orange = self.get_parameter('orange_crop_top_ratio').value
         crop_bottom     = self.get_parameter('crop_bottom_ratio').value
         crop_left       = self.get_parameter('crop_left_ratio').value
 
-        # A ROI principal passa a ser baseada na Laranja (que enxerga mais longe)
-        roi_y_orange = int(h * crop_top_orange)
+        # A ROI principal passa a ser baseada na Laranja (que enxerga mais longe).
+        # Mantive o nome roi_y aqui para NÃO QUEBRAR as funções lá embaixo!
+        roi_y        = int(h * crop_top_orange)
         roi_y_bot    = int(h * (1.0 - crop_bottom))
         roi_x        = int(w * crop_left)
 
-        roi = frame[roi_y_orange:roi_y_bot, roi_x:w]
+        roi = frame[roi_y:roi_y_bot, roi_x:w]
         w = roi.shape[1]   
 
         # 2. Convert to HSV
@@ -168,7 +150,7 @@ class LaneDetectionNode(Node):
         # O PULO DO GATO: Cegar a máscara branca e amarela na parte de cima
         # =================================================================
         # Calcula a diferença em pixels entre a visão de longe e a de perto
-        y_offset_lanes = int(h * crop_top_lanes) - roi_y_orange 
+        y_offset_lanes = int(h * crop_top_lanes) - roi_y 
         
         if y_offset_lanes > 0:
             # Pinta de preto tudo que estiver do topo até a altura de corte das faixas
