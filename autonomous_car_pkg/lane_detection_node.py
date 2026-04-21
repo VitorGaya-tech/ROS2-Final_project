@@ -83,12 +83,12 @@ class LaneDetectionNode(Node):
         self.declare_parameter('crop_top_ratio', 0.5)
         self.declare_parameter('crop_bottom_ratio', 0.1)
         self.declare_parameter('crop_left_ratio', 0.1)
-        self.declare_parameter('crop_top_orange_ratio', 0.3)  # orange uses a shallower top crop
+        self.declare_parameter('crop_top_orange_ratio', 0.1)  # orange uses a shallower top crop
         self.declare_parameter('yellow_target_x_ratio', TARGET_YELLOW_X_RATIO)
         self.declare_parameter('yellow_weight', 0.5)
         self.declare_parameter('right_bias', 0.3)
         self.declare_parameter('yellow_memory_secs', 0.5)  # how long to hold last yellow position
-        self.declare_parameter('min_orange_pixels', 8000)
+        self.declare_parameter('min_orange_pixels', 5000)
         self.declare_parameter('debug_image', True)
 
         # ── Yellow line memory (dashed line compensation) ─────────
@@ -107,7 +107,8 @@ class LaneDetectionNode(Node):
         self.pub_eor       = self.create_publisher(Bool,         '/lane/end_of_road',    10)
         self.pub_white_det = self.create_publisher(Bool,         '/lane/white_detected', 10)
         self.pub_markers   = self.create_publisher(MarkerArray,  '/lane/markers',        10)
-        self.pub_debug     = self.create_publisher(Image,        '/lane/debug_image',    10)
+        self.pub_debug        = self.create_publisher(Image, '/lane/debug_image',  10)
+        self.pub_debug_orange = self.create_publisher(Image, '/lane/debug_orange', 10)
 
         self.bridge = CvBridge()
         self.get_logger().info('Lane detection node started.')
@@ -215,11 +216,12 @@ class LaneDetectionNode(Node):
         self.pub_white_det.publish(Bool(data=white_available))
         self._publish_markers(w, roi_y, white_cnt, yellow_cnt, orange_cnt)
 
-        # 7. Debug image
+        # 7. Debug images
         if self.get_parameter('debug_image').value:
             self._publish_debug(roi, white_mask, yellow_mask, orange_mask_debug,
                                 white_cx, yellow_cx, w, roi_y,
                                 white_available, orange_pixels, yellow_from_memory)
+            self._publish_debug_orange(roi_orange, orange_mask, orange_pixels, end_of_road)
 
     # ── Colour masks ──────────────────────────────────────────────
     def _white_mask(self, hsv):
@@ -350,6 +352,23 @@ class LaneDetectionNode(Node):
 
         msg = self.bridge.cv2_to_imgmsg(debug, encoding='bgr8')
         self.pub_debug.publish(msg)
+
+    # ── Orange-specific debug image ───────────────────────────────
+    def _publish_debug_orange(self, roi_orange, orange_mask, orange_pixels, triggered):
+        debug = roi_orange.copy()
+        debug[orange_mask > 0] = (0, 100, 255)   # orange tint on detected pixels
+
+        # Draw a top border line so it's obvious where the crop starts
+        cv2.line(debug, (0, 0), (debug.shape[1], 0), (0, 255, 255), 3)
+
+        min_px = self.get_parameter('min_orange_pixels').value
+        color  = (0, 255, 0) if triggered else (0, 0, 255)
+        status = 'TRIGGERED' if triggered else 'NOT TRIGGERED'
+        cv2.putText(debug, f'{status}  {orange_pixels}/{min_px}px',
+                    (5, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+
+        msg = self.bridge.cv2_to_imgmsg(debug, encoding='bgr8')
+        self.pub_debug_orange.publish(msg)
 
 
 def main(args=None):
