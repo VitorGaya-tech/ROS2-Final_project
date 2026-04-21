@@ -143,9 +143,10 @@ class LaneDetectionNode(Node):
         hsv_orange = cv2.cvtColor(roi_orange, cv2.COLOR_BGR2HSV)
 
         # 3. Build masks
-        white_mask  = self._white_mask(hsv)
-        yellow_mask = self._yellow_mask(hsv)
-        orange_mask = self._orange_mask(hsv_orange)
+        white_mask        = self._white_mask(hsv)
+        yellow_mask       = self._yellow_mask(hsv)
+        orange_mask       = self._orange_mask(hsv_orange)  # larger ROI → better detection
+        orange_mask_debug = self._orange_mask(hsv)          # same ROI as roi → debug overlay
 
         # 4. Detect white line centroid → primary lateral error
         white_error = 0.0
@@ -216,7 +217,7 @@ class LaneDetectionNode(Node):
 
         # 7. Debug image
         if self.get_parameter('debug_image').value:
-            self._publish_debug(roi, white_mask, yellow_mask, orange_mask,
+            self._publish_debug(roi, white_mask, yellow_mask, orange_mask_debug,
                                 white_cx, yellow_cx, w, roi_y,
                                 white_available, orange_pixels, yellow_from_memory)
 
