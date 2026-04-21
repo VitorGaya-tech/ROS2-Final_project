@@ -82,6 +82,7 @@ class LaneDetectionNode(Node):
         self.declare_parameter('orange_h_max', int(ORANGE_HSV_HIGH[0]))
         self.declare_parameter('crop_top_ratio', 0.5)
         self.declare_parameter('crop_bottom_ratio', 0.1)
+        self.declare_parameter('crop_left_ratio', 0.1)   # fraction of width to ignore on the left
         self.declare_parameter('yellow_target_x_ratio', TARGET_YELLOW_X_RATIO)
         self.declare_parameter('yellow_weight', 0.5)
         self.declare_parameter('right_bias', 0.3)
@@ -120,15 +121,17 @@ class LaneDetectionNode(Node):
         
         h, w = frame.shape[:2]
 
-        # 1. Crop: keep only the bottom (1 - crop_ratio) fraction
-        crop_top = self.get_parameter('crop_top_ratio').value
+        # 1. Crop ROI
+        crop_top    = self.get_parameter('crop_top_ratio').value
         crop_bottom = self.get_parameter('crop_bottom_ratio').value
-        
-        roi_y = int(h * crop_top)
-        roi_y_bottom = int(h * (1.0 - crop_bottom)) # Onde a imagem termina agora
-        
-        # Crop y_top to y_bottom
-        roi = frame[roi_y:roi_y_bottom, 0:w]
+        crop_left   = self.get_parameter('crop_left_ratio').value
+
+        roi_y      = int(h * crop_top)
+        roi_y_bot  = int(h * (1.0 - crop_bottom))
+        roi_x      = int(w * crop_left)
+
+        roi = frame[roi_y:roi_y_bot, roi_x:w]
+        w = roi.shape[1]   # update w so all centroid calculations stay correct
 
         # 2. Convert to HSV
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
