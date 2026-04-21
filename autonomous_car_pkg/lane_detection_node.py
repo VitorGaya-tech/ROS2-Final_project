@@ -64,7 +64,7 @@ MIN_CONTOUR_AREA = 2500
 TARGET_WHITE_X_RATIO = 0.20
 
 # How far from the left edge (0–1) the yellow line centroid should sit
-TARGET_YELLOW_X_RATIO = 0.20
+TARGET_YELLOW_X_RATIO = 0.1
 
 
 class LaneDetectionNode(Node):
