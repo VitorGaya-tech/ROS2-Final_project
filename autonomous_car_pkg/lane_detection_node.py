@@ -113,7 +113,6 @@ class LaneDetectionNode(Node):
         self.get_logger().info('Lane detection node started.')
 
     # ── Main callback ─────────────────────────────────────────────
-    # ── Main callback ─────────────────────────────────────────────
     def image_callback(self, msg: Image):
         try:
             frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
@@ -123,41 +122,37 @@ class LaneDetectionNode(Node):
         
         h, w = frame.shape[:2]
 
-        # 1. Parâmetros de Crop Desacoplados
+        # 1. Parâmetros de Crop 
         crop_top_lanes  = self.get_parameter('crop_top_ratio').value
         crop_top_orange = self.get_parameter('orange_crop_top_ratio').value
         crop_bottom     = self.get_parameter('crop_bottom_ratio').value
         crop_left       = self.get_parameter('crop_left_ratio').value
 
-        # A ROI principal passa a ser baseada na Laranja (que enxerga mais longe).
-        # Mantive o nome roi_y aqui para NÃO QUEBRAR as funções lá embaixo!
-        roi_y        = int(h * crop_top_orange)
-        roi_y_bot    = int(h * (1.0 - crop_bottom))
-        roi_x        = int(w * crop_left)
-
-        roi = frame[roi_y:roi_y_bot, roi_x:w]
-        w = roi.shape[1]   
-
-        # 2. Convert to HSV
-        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-
-        # 3. Build masks
-        white_mask  = self._white_mask(hsv)
-        yellow_mask = self._yellow_mask(hsv)
-        orange_mask = self._orange_mask(hsv)
+        roi_y_bot = int(h * (1.0 - crop_bottom))
+        roi_x     = int(w * crop_left)
 
         # =================================================================
-        # O PULO DO GATO: Cegar a máscara branca e amarela na parte de cima
+        # ROI 1: FAIXAS (O seu crop original, seguro e blindado contra ruído)
         # =================================================================
-        # Calcula a diferença em pixels entre a visão de longe e a de perto
-        y_offset_lanes = int(h * crop_top_lanes) - roi_y 
-        
-        if y_offset_lanes > 0:
-            # Pinta de preto tudo que estiver do topo até a altura de corte das faixas
-            white_mask[0:y_offset_lanes, :] = 0
-            yellow_mask[0:y_offset_lanes, :] = 0
+        roi_y_lanes = int(h * crop_top_lanes)
+        roi_lanes   = frame[roi_y_lanes:roi_y_bot, roi_x:w]
+        w_lanes     = roi_lanes.shape[1]   
+
+        hsv_lanes   = cv2.cvtColor(roi_lanes, cv2.COLOR_BGR2HSV)
+        white_mask  = self._white_mask(hsv_lanes)
+        yellow_mask = self._yellow_mask(hsv_lanes)
+
+        # =================================================================
+        # ROI 2: LARANJA (Corte alto, só pra enxergar o final da pista)
+        # =================================================================
+        roi_y_orange = int(h * crop_top_orange)
+        roi_orange   = frame[roi_y_orange:roi_y_bot, roi_x:w]
+
+        hsv_orange  = cv2.cvtColor(roi_orange, cv2.COLOR_BGR2HSV)
+        orange_mask = self._orange_mask(hsv_orange)
+
             
-        # 4. Detect white line centroid → primary lateral error
+        # 4. Detect white line centroid → primary lateral error (Usando w_lanes)
         white_error = 0.0
         white_cx = None
         white_cnt = self._largest_contour(white_mask)
@@ -165,8 +160,8 @@ class LaneDetectionNode(Node):
             M = cv2.moments(white_cnt)
             if M['m00'] > 0:
                 white_cx = int(M['m10'] / M['m00'])
-                target_white_x = int(w * (1.0 - TARGET_WHITE_X_RATIO))
-                white_error = (white_cx - target_white_x) / float(w / 2)
+                target_white_x = int(w_lanes * (1.0 - TARGET_WHITE_X_RATIO))
+                white_error = (white_cx - target_white_x) / float(w_lanes / 2)
 
         # 4b. Detect yellow line centroid → fallback lateral error
         yellow_error      = 0.0
@@ -181,8 +176,8 @@ class LaneDetectionNode(Node):
             M = cv2.moments(yellow_cnt)
             if M['m00'] > 0:
                 yellow_cx = int(M['m10'] / M['m00'])
-                target_yellow_x = int(w * self.get_parameter('yellow_target_x_ratio').value)
-                yellow_error = (yellow_cx - target_yellow_x) / float(w / 2)
+                target_yellow_x = int(w_lanes * self.get_parameter('yellow_target_x_ratio').value)
+                yellow_error = (yellow_cx - target_yellow_x) / float(w_lanes / 2)
                 self.last_yellow_cx    = yellow_cx
                 self.last_yellow_stamp = now_sec
                 yellow_available = True
@@ -192,8 +187,8 @@ class LaneDetectionNode(Node):
             if (self.last_yellow_cx is not None and
                     (now_sec - self.last_yellow_stamp) < memory_secs):
                 yellow_cx = self.last_yellow_cx
-                target_yellow_x = int(w * self.get_parameter('yellow_target_x_ratio').value)
-                yellow_error = (yellow_cx - target_yellow_x) / float(w / 2)
+                target_yellow_x = int(w_lanes * self.get_parameter('yellow_target_x_ratio').value)
+                yellow_error = (yellow_cx - target_yellow_x) / float(w_lanes / 2)
                 yellow_available  = True
                 yellow_from_memory = True
 
@@ -222,12 +217,21 @@ class LaneDetectionNode(Node):
         self.pub_error.publish(Float32(data=float(final_error)))
         self.pub_eor.publish(Bool(data=end_of_road))
         self.pub_white_det.publish(Bool(data=white_available))
-        self._publish_markers(w, roi_y, white_cnt, yellow_cnt, orange_cnt)
+        self._publish_markers(w_lanes, roi_y_lanes, white_cnt, yellow_cnt, orange_cnt)
 
         # 7. Debug image
         if self.get_parameter('debug_image').value:
-            self._publish_debug(roi, white_mask, yellow_mask, orange_mask,
-                                white_cx, yellow_cx, w, roi_y,
+            # Reconstruindo máscaras para o Debug ficar visualmente perfeito
+            full_white = np.zeros_like(orange_mask)
+            full_yellow = np.zeros_like(orange_mask)
+            
+            offset = roi_y_lanes - roi_y_orange
+            if offset >= 0:
+                full_white[offset:, :] = white_mask
+                full_yellow[offset:, :] = yellow_mask
+
+            self._publish_debug(roi_orange, full_white, full_yellow, orange_mask,
+                                white_cx, yellow_cx, w_lanes, roi_y_orange,
                                 white_available, orange_pixels, yellow_from_memory)
 
     # ── Colour masks ──────────────────────────────────────────────
