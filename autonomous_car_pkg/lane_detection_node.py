@@ -56,8 +56,8 @@ YELLOW_H_MIN, YELLOW_H_MAX =  25,  60
 YELLOW_S_MIN, YELLOW_S_MAX =  80, 255
 YELLOW_V_MIN, YELLOW_V_MAX =  80, 255
 
-ORANGE_H_MIN, ORANGE_H_MAX =   5,  15
-ORANGE_S_MIN, ORANGE_S_MAX = 150, 255
+ORANGE_H_MIN, ORANGE_H_MAX =   5,  30
+ORANGE_S_MIN, ORANGE_S_MAX = 70, 255
 ORANGE_V_MIN, ORANGE_V_MAX = 150, 255
 
 # Minimum contour area to be considered a real line (px²)
@@ -96,7 +96,7 @@ class LaneDetectionNode(Node):
         self.declare_parameter('orange_s_max', ORANGE_S_MAX)
         self.declare_parameter('orange_v_min', ORANGE_V_MIN)
         self.declare_parameter('orange_v_max', ORANGE_V_MAX)
-        
+
         self.declare_parameter('crop_top_ratio', 0.5)
         self.declare_parameter('crop_bottom_ratio', 0.1)
         self.declare_parameter('crop_left_ratio', 0.1)
@@ -105,7 +105,7 @@ class LaneDetectionNode(Node):
         self.declare_parameter('yellow_weight', 0.5)
         self.declare_parameter('right_bias', 0.3)
         self.declare_parameter('yellow_memory_secs', 0.5)  # how long to hold last yellow position
-        self.declare_parameter('min_orange_pixels', 5000)
+        self.declare_parameter('min_orange_pixels', 4500)
         self.declare_parameter('debug_image', True)
 
         # ── Yellow line memory (dashed line compensation) ─────────

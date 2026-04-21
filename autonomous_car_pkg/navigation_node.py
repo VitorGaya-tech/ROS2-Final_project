@@ -51,7 +51,7 @@ RECOVERY_ANGULAR       = 0.4   # rad/s left curve during LANE_RECOVERY
 WHITE_ABSENT_THRESH    = 25    # control cycles (~0.75 s at 20 Hz) without white → FORK_RIGHT
 
 # U-turn manoeuvre: 90° spin → forward → 90° spin
-UTURN_SPIN_SPEED     = 1.3    # rad/s for each 90° turn
+UTURN_SPIN_SPEED     = 0.9    # rad/s for each 90° turn
 UTURN_SPIN_DURATION  = 1.75   # seconds per 90° (~π/2 / 0.9)
 UTURN_FWD_DURATION   = 3.5    # seconds driving forward between the two spins
 
