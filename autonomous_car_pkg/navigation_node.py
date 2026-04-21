@@ -45,12 +45,15 @@ DEFAULT_MAX_TURN  = 1.2    # rad/s maximum angular velocity
 
 # Duration of manoeuvres (seconds)
 RIGHT_TURN_DURATION    = 2.2   # timed right turn at intersection
-TURNAROUND_DURATION    = 3.5   # 180° spin (~π / ω  where ω≈0.9)
-TURNAROUND_SPEED       = 0.9   # rad/s for 180° spin
 FORK_RIGHT_TIMEOUT     = 4.0   # max seconds seeking right fork before giving up
 RECOVERY_DURATION      = 2.0   # seconds of post-turnaround realignment
 RECOVERY_ANGULAR       = 0.4   # rad/s left curve during LANE_RECOVERY
-WHITE_ABSENT_THRESH    = 15     # control cycles (~0.75 s at 20 Hz) without white → FORK_RIGHT
+WHITE_ABSENT_THRESH    = 15    # control cycles (~0.75 s at 20 Hz) without white → FORK_RIGHT
+
+# U-turn manoeuvre: 90° spin → forward → 90° spin
+UTURN_SPIN_SPEED     = 0.9    # rad/s for each 90° turn
+UTURN_SPIN_DURATION  = 1.75   # seconds per 90° (~π/2 / 0.9)
+UTURN_FWD_DURATION   = 0.8    # seconds driving forward between the two spins
 
 
 class NavigationNode(Node):
@@ -72,8 +75,9 @@ class NavigationNode(Node):
         self.current_error = 0.0
         self.external_override = 'NONE'
 
-        self.white_detected      = True   # from /lane/white_detected
-        self.white_absent_cycles = 0      # consecutive cycles without white line
+        self.white_detected      = True
+        self.white_absent_cycles = 0
+        self.turn_phase          = 0      # sub-phase for TURNING_AROUND (0, 1, 2)
 
         # ── Subscribers ───────────────────────────────────────────
         self.create_subscription(Float32, '/lane/error',          self._error_cb,     10)
@@ -98,7 +102,8 @@ class NavigationNode(Node):
 
     def _eor_cb(self, msg: Bool):
         if msg.data and self.state == 'FOLLOWING':
-            self.get_logger().info('End of road detected → TURNING_AROUND')
+            self.get_logger().info('End of road detected → TURNING_AROUND (phase 0)')
+            self.turn_phase = 0
             self._start_manoeuvre('TURNING_AROUND')
 
     def _behavior_cb(self, msg: String):
@@ -132,12 +137,27 @@ class NavigationNode(Node):
 
         if self.state == 'TURNING_AROUND':
             elapsed = time.time() - self.manoeuvre_start
-            if elapsed < TURNAROUND_DURATION:
-                cmd.linear.x  = 0.0
-                cmd.angular.z = TURNAROUND_SPEED
-            else:
-                self.get_logger().info('Turnaround done → LANE_RECOVERY')
-                self._start_manoeuvre('LANE_RECOVERY')
+            if self.turn_phase == 0:                        # first 90°
+                if elapsed < UTURN_SPIN_DURATION:
+                    cmd.angular.z = UTURN_SPIN_SPEED
+                else:
+                    self.get_logger().info('U-turn phase 1 → forward')
+                    self.turn_phase = 1
+                    self.manoeuvre_start = time.time()
+            elif self.turn_phase == 1:                      # forward
+                if elapsed < UTURN_FWD_DURATION:
+                    cmd.linear.x = self.get_parameter('base_speed').value
+                else:
+                    self.get_logger().info('U-turn phase 2 → second 90°')
+                    self.turn_phase = 2
+                    self.manoeuvre_start = time.time()
+            elif self.turn_phase == 2:                      # second 90°
+                if elapsed < UTURN_SPIN_DURATION:
+                    cmd.angular.z = UTURN_SPIN_SPEED
+                else:
+                    self.get_logger().info('U-turn done → LANE_RECOVERY')
+                    self.turn_phase = 0
+                    self._start_manoeuvre('LANE_RECOVERY')
             self.pub_cmd.publish(cmd)
             return
 
