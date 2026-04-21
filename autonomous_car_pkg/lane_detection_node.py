@@ -46,16 +46,19 @@ from cv_bridge import CvBridge
 
 
 # ──────────────────────────────────────────────────────────────────
-#  Default HSV thresholds  (tune via ROS parameters)
+#  Default HSV thresholds — all exposed as ROS parameters
 # ──────────────────────────────────────────────────────────────────
-WHITE_HSV_LOW  = (0,   0,  220)
-WHITE_HSV_HIGH = (180, 30, 255)
+WHITE_H_MIN,  WHITE_H_MAX  =   0, 180
+WHITE_S_MIN,  WHITE_S_MAX  =  10,  30
+WHITE_V_MIN,  WHITE_V_MAX  = 220, 255
 
-YELLOW_HSV_LOW  = (25,  100, 120)
-YELLOW_HSV_HIGH = (60, 255, 255)
+YELLOW_H_MIN, YELLOW_H_MAX =  25,  60
+YELLOW_S_MIN, YELLOW_S_MAX =  80, 255
+YELLOW_V_MIN, YELLOW_V_MAX =  80, 255
 
-ORANGE_HSV_LOW  = (5,  150, 150)
-ORANGE_HSV_HIGH = (15, 255, 255)
+ORANGE_H_MIN, ORANGE_H_MAX =   5,  15
+ORANGE_S_MIN, ORANGE_S_MAX = 150, 255
+ORANGE_V_MIN, ORANGE_V_MAX = 150, 255
 
 # Minimum contour area to be considered a real line (px²)
 MIN_CONTOUR_AREA = 2500
@@ -73,13 +76,27 @@ class LaneDetectionNode(Node):
         super().__init__('lane_detection_node')
 
         # ── Parameters (tunable at runtime) ──────────────────────
-        self.declare_parameter('white_h_min',  int(WHITE_HSV_LOW[0]))
-        self.declare_parameter('white_s_max',  int(WHITE_HSV_HIGH[1]))
-        self.declare_parameter('white_v_min',  int(WHITE_HSV_LOW[2]))
-        self.declare_parameter('yellow_h_min', int(YELLOW_HSV_LOW[0]))
-        self.declare_parameter('yellow_h_max', int(YELLOW_HSV_HIGH[0]))
-        self.declare_parameter('orange_h_min', int(ORANGE_HSV_LOW[0]))
-        self.declare_parameter('orange_h_max', int(ORANGE_HSV_HIGH[0]))
+        self.declare_parameter('white_h_min',  WHITE_H_MIN)
+        self.declare_parameter('white_h_max',  WHITE_H_MAX)
+        self.declare_parameter('white_s_min',  WHITE_S_MIN)
+        self.declare_parameter('white_s_max',  WHITE_S_MAX)
+        self.declare_parameter('white_v_min',  WHITE_V_MIN)
+        self.declare_parameter('white_v_max',  WHITE_V_MAX)
+
+        self.declare_parameter('yellow_h_min', YELLOW_H_MIN)
+        self.declare_parameter('yellow_h_max', YELLOW_H_MAX)
+        self.declare_parameter('yellow_s_min', YELLOW_S_MIN)
+        self.declare_parameter('yellow_s_max', YELLOW_S_MAX)
+        self.declare_parameter('yellow_v_min', YELLOW_V_MIN)
+        self.declare_parameter('yellow_v_max', YELLOW_V_MAX)
+
+        self.declare_parameter('orange_h_min', ORANGE_H_MIN)
+        self.declare_parameter('orange_h_max', ORANGE_H_MAX)
+        self.declare_parameter('orange_s_min', ORANGE_S_MIN)
+        self.declare_parameter('orange_s_max', ORANGE_S_MAX)
+        self.declare_parameter('orange_v_min', ORANGE_V_MIN)
+        self.declare_parameter('orange_v_max', ORANGE_V_MAX)
+        
         self.declare_parameter('crop_top_ratio', 0.5)
         self.declare_parameter('crop_bottom_ratio', 0.1)
         self.declare_parameter('crop_left_ratio', 0.1)
@@ -225,32 +242,34 @@ class LaneDetectionNode(Node):
 
     # ── Colour masks ──────────────────────────────────────────────
     def _white_mask(self, hsv):
-        h_min = self.get_parameter('white_h_min').value
-        s_max = self.get_parameter('white_s_max').value
-        v_min = self.get_parameter('white_v_min').value
-        lo = np.array([h_min, 10,     v_min])
-        hi = np.array([180,   s_max, 255])
+        lo = np.array([self.get_parameter('white_h_min').value,
+                       self.get_parameter('white_s_min').value,
+                       self.get_parameter('white_v_min').value])
+        hi = np.array([self.get_parameter('white_h_max').value,
+                       self.get_parameter('white_s_max').value,
+                       self.get_parameter('white_v_max').value])
         mask = cv2.inRange(hsv, lo, hi)
-        return cv2.morphologyEx(mask, cv2.MORPH_OPEN,
-                                np.ones((5, 5), np.uint8))
+        return cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
 
     def _yellow_mask(self, hsv):
-        h_min = self.get_parameter('yellow_h_min').value
-        h_max = self.get_parameter('yellow_h_max').value
-        lo = np.array([h_min, 80, 80])
-        hi = np.array([h_max, 255, 255])
+        lo = np.array([self.get_parameter('yellow_h_min').value,
+                       self.get_parameter('yellow_s_min').value,
+                       self.get_parameter('yellow_v_min').value])
+        hi = np.array([self.get_parameter('yellow_h_max').value,
+                       self.get_parameter('yellow_s_max').value,
+                       self.get_parameter('yellow_v_max').value])
         mask = cv2.inRange(hsv, lo, hi)
-        return cv2.morphologyEx(mask, cv2.MORPH_OPEN,
-                                np.ones((5, 5), np.uint8))
+        return cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
 
     def _orange_mask(self, hsv):
-        h_min = self.get_parameter('orange_h_min').value
-        h_max = self.get_parameter('orange_h_max').value
-        lo = np.array([h_min, 150, 150])
-        hi = np.array([h_max, 255, 255])
+        lo = np.array([self.get_parameter('orange_h_min').value,
+                       self.get_parameter('orange_s_min').value,
+                       self.get_parameter('orange_v_min').value])
+        hi = np.array([self.get_parameter('orange_h_max').value,
+                       self.get_parameter('orange_s_max').value,
+                       self.get_parameter('orange_v_max').value])
         mask = cv2.inRange(hsv, lo, hi)
-        return cv2.morphologyEx(mask, cv2.MORPH_OPEN,
-                                np.ones((7, 7), np.uint8))
+        return cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((7, 7), np.uint8))
 
     # ── Contour helper ────────────────────────────────────────────
     def _largest_contour(self, mask):
