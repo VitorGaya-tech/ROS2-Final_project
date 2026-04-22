@@ -47,9 +47,24 @@ def generate_launch_description():
         executable='async_slam_toolbox_node',
         name='slam_toolbox',
         output='screen',
-        parameters=[
-            slam_params, 
-            {'use_sim_time': False}
+        parameters=[{
+            'use_sim_time': False, # Muda para True se estiveres num simulador!
+            'mode': 'mapping',
+            'scan_topic': '/scan',
+            'odom_topic': '/odometry/filtered',
+            'map_frame': 'map',
+            'base_frame': 'base_link',
+            'odom_frame': 'odom',
+            'resolution': 0.05,
+            'max_laser_range': 5.0,
+            'minimum_travel_distance': 0.05,
+            'minimum_travel_heading': 0.1,
+            'use_scan_matching': True,
+            'use_scan_barycenter': True,
+            'minimum_time_interval': 0.1,
+            'do_loop_closing': True,
+            'loop_search_maximum_distance': 3.0
+        }
         ],
     )
 
