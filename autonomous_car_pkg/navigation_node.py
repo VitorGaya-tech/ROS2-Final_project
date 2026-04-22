@@ -136,7 +136,7 @@ class NavigationNode(Node):
             return
 
         if self.state == 'TURNING_AROUND':
-            if self.white_detected:
+            if self.white_detected and self.turn_phase != 0:
                 self.get_logger().info('White line found mid-turn → FOLLOWING')
                 self.turn_phase = 0
                 self.white_absent_cycles = 0
