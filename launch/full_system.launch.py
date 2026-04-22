@@ -50,12 +50,7 @@ def generate_launch_description():
         executable='lane_detection_node',
         name='lane_detection_node',
         output='screen',
-        parameters=[{
-            'debug_image': True,
-            'crop_top_ratio': 0.5,
-            'white_v_min': 160,
-            'white_s_max': 60,
-        }],
+        parameters=[{'debug_image': True}],
     )
 
     lane_map = Node(
