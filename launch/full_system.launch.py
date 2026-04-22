@@ -34,7 +34,7 @@ def generate_launch_description():
         'use_rviz', default_value='false',
         description='Launch RViz')
 
-    # ── slam_toolbox ──────────────────────────────────────────────
+    # ── slam_toolbox (provides map → odom TF) ────────────────────
     slam_params = PathJoinSubstitution([pkg, 'config', 'slam_toolbox.yaml'])
     slam_node = Node(
         package='slam_toolbox',
