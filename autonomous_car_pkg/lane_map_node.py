@@ -99,7 +99,7 @@ class LaneMapNode(Node):
 
         try:
             transform = self.tf_buffer.lookup_transform(
-                'map', 'base_link',
+                'map', 'base_footprint',
                 rclpy.time.Time(),
                 timeout=rclpy.duration.Duration(seconds=0.05))
 

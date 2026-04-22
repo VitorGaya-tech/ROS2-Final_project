@@ -34,22 +34,6 @@ def generate_launch_description():
         'use_rviz', default_value='false',
         description='Launch RViz')
 
-    # ── slam_toolbox ──────────────────────────────────────────────
-    # slam_toolbox must be installed: sudo apt install ros-humble-slam-toolbox
-    slam_params = PathJoinSubstitution([pkg, 'config', 'slam_toolbox.yaml'])
-
-    slam_node = Node(
-        package='slam_toolbox',
-        executable='async_slam_toolbox_node',
-        name='slam_toolbox',
-        output='screen',
-        parameters=[
-            slam_params,
-            {'use_sim_time': False},
-        ],
-        remappings=[('/scan', '/scan')],
-    )
-
     # ── Our nodes ─────────────────────────────────────────────────
     lane_detection = Node(
         package='autonomous_car_pkg',
@@ -114,7 +98,6 @@ def generate_launch_description():
 
     return LaunchDescription([
         use_rviz_arg,
-        slam_node,
         lane_detection,
         lane_map,
         navigation,
