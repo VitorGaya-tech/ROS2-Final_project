@@ -35,13 +35,23 @@ def generate_launch_description():
         description='Launch RViz')
 
     # ── slam_toolbox (provides map → odom TF) ────────────────────
-    slam_params = PathJoinSubstitution([pkg, 'config', 'slam_toolbox.yaml'])
     slam_node = Node(
         package='slam_toolbox',
         executable='async_slam_toolbox_node',
         name='slam_toolbox',
         output='screen',
-        parameters=[slam_params, {'use_sim_time': False}],
+        parameters=[{
+            'use_sim_time': False,
+            'odom_topic': '/odometry/filtered',
+            'scan_topic': '/scan',
+            'map_frame': 'map',
+            'odom_frame': 'odom',
+            'base_frame': 'base_footprint',
+            'resolution': 0.05,
+            'max_laser_range': 5.0,
+            'use_scan_matching': True,
+            'do_loop_closing': True,
+        }],
     )
 
     # ── Our nodes ─────────────────────────────────────────────────
@@ -50,7 +60,6 @@ def generate_launch_description():
         executable='lane_detection_node',
         name='lane_detection_node',
         output='screen',
-        parameters=[{'debug_image': True}],
     )
 
     lane_map = Node(
@@ -65,12 +74,6 @@ def generate_launch_description():
         executable='navigation_node',
         name='navigation_node',
         output='screen',
-        parameters=[{
-            'kp': 0.8,
-            'kd': 0.15,
-            'base_speed': 0.15,
-            'max_turn': 1.2,
-        }],
     )
 
     obstacle_avoidance = Node(
@@ -78,10 +81,6 @@ def generate_launch_description():
         executable='obstacle_avoidance',
         name='obstacle_avoidance',
         output='screen',
-        parameters=[{
-            'stop_distance': 0.40,
-            'cone_half_deg': 25.0,
-        }],
     )
 
     behavior = Node(
