@@ -28,8 +28,11 @@ from ament_index_python.packages import get_package_share_directory
 import os
 
 def generate_launch_description():
-    # Pega o caminho absoluto da pasta install do seu pacote na força bruta
+    # Caminho absoluto para o os.path.join (usado pelo slam_toolbox)
     pkg_dir = get_package_share_directory('autonomous_car_pkg')
+    
+    # Objeto de substituição (usado pelo RViz lá embaixo)
+    pkg = FindPackageShare('autonomous_car_pkg')
 
     use_rviz_arg = DeclareLaunchArgument(
         'use_rviz', default_value='false',
