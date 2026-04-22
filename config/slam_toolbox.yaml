@@ -12,7 +12,7 @@ slam_toolbox:
     scan_topic: /scan
     odom_topic: /odometry/filtered
     map_frame:  map
-    base_frame: base_footprint
+    base_frame: base_link
     odom_frame: odom
 
     # Fresh start every run — do NOT set a serialized map file
