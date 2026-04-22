@@ -10,7 +10,7 @@ slam_toolbox:
 
     # Topic names (match your robot's actual topics)
     scan_topic: /scan
-    odom_topic: /odom
+    odom_topic: /odometry/filtered
     map_frame:  map
     base_frame: base_link
     odom_frame: odom
