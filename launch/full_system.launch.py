@@ -24,24 +24,30 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from ament_index_python.packages import get_package_share_directory
 import os
 
-
 def generate_launch_description():
-    pkg = FindPackageShare('autonomous_car_pkg')
+    # Pega o caminho absoluto da pasta install do seu pacote na força bruta
+    pkg_dir = get_package_share_directory('autonomous_car_pkg')
 
     use_rviz_arg = DeclareLaunchArgument(
         'use_rviz', default_value='false',
         description='Launch RViz')
 
-    # ── slam_toolbox (provides map → odom TF) ────────────────────
-    slam_params = PathJoinSubstitution([pkg, 'config', 'slam_toolbox.yaml'])
+    # Monta o caminho exato para o YAML
+    slam_params = os.path.join(pkg_dir, 'config', 'slam_toolbox.yaml')
+
+    # ── slam_toolbox ─────────────────────────────────────────────
     slam_node = Node(
         package='slam_toolbox',
         executable='async_slam_toolbox_node',
         name='slam_toolbox',
         output='screen',
-        parameters=[slam_params, {'use_sim_time': False}],
+        parameters=[
+            slam_params, 
+            {'use_sim_time': False}
+        ],
     )
 
     # ── Our nodes ─────────────────────────────────────────────────
