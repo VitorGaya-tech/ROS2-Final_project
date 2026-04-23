@@ -28,44 +28,30 @@ from ament_index_python.packages import get_package_share_directory
 import os
 
 def generate_launch_description():
-    # Caminho absoluto para o os.path.join (usado pelo slam_toolbox)
     pkg_dir = get_package_share_directory('autonomous_car_pkg')
-    
-    # Objeto de substituição (usado pelo RViz lá embaixo)
     pkg = FindPackageShare('autonomous_car_pkg')
 
     use_rviz_arg = DeclareLaunchArgument(
         'use_rviz', default_value='false',
         description='Launch RViz')
 
-    # Monta o caminho exato para o YAML
+    # Caminho absoluto para o seu arquivo YAML (Voltamos a usá-lo!)
     slam_params = os.path.join(pkg_dir, 'config', 'slam_toolbox.yaml')
 
-    # ── slam_toolbox ─────────────────────────────────────────────
-    slam_node = Node(
-        package='slam_toolbox',
-        executable='async_slam_toolbox_node',
-        name='slam_toolbox',
-        output='screen',
-        parameters=[{
-            'use_sim_time': False, # Muda para True se estiveres num simulador!
-            'mode': 'mapping',
-            'scan_topic': '/scan',
-            'odom_topic': '/odometry/filtered',
-            'map_frame': 'map',
-            'base_frame': 'base_link',
-            'odom_frame': 'odom',
-            'resolution': 0.05,
-            'max_laser_range': 5.0,
-            'minimum_travel_distance': 0.05,
-            'minimum_travel_heading': 0.1,
-            'use_scan_matching': True,
-            'use_scan_barycenter': True,
-            'minimum_time_interval': 0.1,
-            'do_loop_closing': True,
-            'loop_search_maximum_distance': 3.0
-        }
-        ],
+    # ── SLAM TOOLBOX (O Jeito Oficial e Imbatível) ────────────────────
+    # Aqui nós chamamos o launch do próprio pacote do slam_toolbox
+    slam_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            PathJoinSubstitution([
+                FindPackageShare('slam_toolbox'), 
+                'launch', 
+                'online_async_launch.py'
+            ])
+        ]),
+        launch_arguments={
+            'slam_params_file': slam_params,
+            'use_sim_time': 'false'
+        }.items()
     )
 
     # ── Our nodes ─────────────────────────────────────────────────
@@ -116,17 +102,11 @@ def generate_launch_description():
 
     # ── RViz (optional) ───────────────────────────────────────────
     rviz_config = PathJoinSubstitution([pkg, 'config', 'autonomous_car.rviz'])
-    rviz = Node(
-        package='rviz2',
-        executable='rviz2',
-        name='rviz2',
-        arguments=['-d', rviz_config],
-        condition=IfCondition(LaunchConfiguration('use_rviz')),
-    )
+    rviz = Node(package='rviz2', executable='rviz2', name='rviz2', arguments=['-d', rviz_config], condition=IfCondition(LaunchConfiguration('use_rviz')))
 
     return LaunchDescription([
         use_rviz_arg,
-        slam_node,
+        slam_launch,      # <--- Substituímos o slam_node por slam_launch
         lane_detection,
         lane_map,
         navigation,
