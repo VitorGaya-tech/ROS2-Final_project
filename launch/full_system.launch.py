@@ -32,7 +32,7 @@ def generate_launch_description():
     pkg = FindPackageShare('autonomous_car_pkg')
 
     use_rviz_arg = DeclareLaunchArgument(
-        'use_rviz', default_value='false',
+        'use_rviz', default_value='true',
         description='Launch RViz')
 
     # Caminho absoluto para o seu arquivo YAML (Voltamos a usá-lo!)

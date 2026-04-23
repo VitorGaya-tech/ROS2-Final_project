@@ -20,10 +20,11 @@ them as a persistent marker array so they appear as a "breadcrumb trail" in RViz
 
 import rclpy
 from rclpy.node import Node
-
 from visualization_msgs.msg import Marker, MarkerArray
 from nav_msgs.msg import Path
 from geometry_msgs.msg import PoseStamped, Point
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+
 
 try:
     from tf2_ros import Buffer, TransformListener
@@ -56,9 +57,9 @@ class LaneMapNode(Node):
             MarkerArray, '/lane/markers', self._markers_cb, 10)
 
         self.pub_lane_markers = self.create_publisher(
-            MarkerArray, '/map/lane_markers', 10)
+            MarkerArray, '/lane_makers', 10)
         self.pub_path = self.create_publisher(
-            Path, '/map/lane_path', 10)
+            Path, '/lane_path', 10)
 
         # Republish accumulated map every 0.5 s
         self.create_timer(0.5, self._republish_map)
