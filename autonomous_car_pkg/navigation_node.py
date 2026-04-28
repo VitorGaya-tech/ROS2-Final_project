@@ -38,10 +38,10 @@ from geometry_msgs.msg import Twist
 
 
 # ── Default gains (tune via ROS parameters) ───────────────────────
-DEFAULT_KP        = 0.8    # proportional gain
-DEFAULT_KD        = 0.15   # derivative gain
+DEFAULT_KP        = 1.2    # proportional gain
+DEFAULT_KD        = 0.2    # derivative gain
 DEFAULT_BASE_SPEED = 0.15  # m/s forward
-DEFAULT_MAX_TURN  = 1.2    # rad/s maximum angular velocity
+DEFAULT_MAX_TURN  = 1.5    # rad/s maximum angular velocity
 
 # Duration of manoeuvres (seconds)
 RIGHT_TURN_DURATION    = 2.2   # timed right turn at intersection
@@ -223,7 +223,7 @@ class NavigationNode(Node):
         # Clamp angular velocity
         cmd.angular.z = max(-max_turn, min(max_turn, raw_turn))
         # Slow down proportionally to how much we are turning
-        cmd.linear.x  = base_speed * (1.0 - 0.5 * abs(self.current_error))
+        cmd.linear.x  = base_speed * (1.0 - 0.7 * abs(self.current_error))
         cmd.linear.x  = max(0.05, cmd.linear.x)   # never stop completely
 
         self.last_error = self.current_error

@@ -39,8 +39,9 @@ except ImportError:
     TF_AVAILABLE = False
 
 
-MAX_MARKERS = 2000   # max stored waypoints per trail
-DEDUPE_DIST = 0.05   # metres — skip if last point is closer than this
+MAX_MARKERS   = 2000   # max stored waypoints per trail
+DEDUPE_DIST   = 0.10   # metres — skip if last point is closer than this
+SMOOTH_WINDOW = 5      # points averaged for display (raw data unchanged)
 
 
 class LaneMapNode(Node):
@@ -127,6 +128,24 @@ class LaneMapNode(Node):
             # TF not yet available (SLAM still initialising)
             return p
 
+    # ── Smoothing helper ──────────────────────────────────────────
+    def _smooth(self, trail: list) -> list:
+        n = len(trail)
+        if n < SMOOTH_WINDOW:
+            return list(trail)
+        half = SMOOTH_WINDOW // 2
+        result = []
+        for i in range(n):
+            lo = max(0, i - half)
+            hi = min(n, i + half + 1)
+            pts = trail[lo:hi]
+            p = Point()
+            p.x = sum(pt.x for pt in pts) / len(pts)
+            p.y = sum(pt.y for pt in pts) / len(pts)
+            p.z = 0.0
+            result.append(p)
+        return result
+
     # ── Periodic republish ─────────────────────────────────────────
     def _republish_map(self):
         if not self.white_trail and not self.yellow_trail:
@@ -152,9 +171,9 @@ class LaneMapNode(Node):
             return m
 
         if self.white_trail:
-            arr.markers.append(make_strip(self.white_trail,  0, 1.0, 1.0, 1.0))  # white
+            arr.markers.append(make_strip(self._smooth(self.white_trail),  0, 1.0, 1.0, 1.0))
         if self.yellow_trail:
-            arr.markers.append(make_strip(self.yellow_trail, 1, 1.0, 0.9, 0.0))  # yellow
+            arr.markers.append(make_strip(self._smooth(self.yellow_trail), 1, 1.0, 0.9, 0.0))
 
         self.pub_markers.publish(arr)
 
@@ -163,7 +182,7 @@ class LaneMapNode(Node):
             path = Path()
             path.header.frame_id = 'map'
             path.header.stamp    = stamp
-            for pt in self.white_trail:
+            for pt in self._smooth(self.white_trail):
                 ps = PoseStamped()
                 ps.header = path.header
                 ps.pose.position = pt
