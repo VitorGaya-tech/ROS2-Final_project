@@ -115,6 +115,9 @@ class NavigationNode(Node):
             self.state = 'FOLLOWING'
         elif msg.data == 'TURN_RIGHT' and self.state == 'FOLLOWING':
             self._start_manoeuvre('TURNING_RIGHT')
+        elif msg.data == 'TURN_AROUND' and self.state == 'FOLLOWING':
+            self.turn_phase = 0
+            self._start_manoeuvre('TURNING_AROUND')
 
     # ── Main control loop ─────────────────────────────────────────
     def _control_loop(self):

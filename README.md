@@ -14,6 +14,7 @@ autonomous_car_pkg/
 │   ├── navigation_node.py       # PD controller → /cmd_vel
 │   ├── obstacle_avoidance.py    # LiDAR stop/go logic
 │   ├── behavior_controller.py   # top-level state machine
+│   ├── sign_detection_node.py   # YOLO sign detector → /sign/detected
 │   └── lane_map_node.py         # accumulates lane trail in /map frame
 ├── launch/
 │   └── full_system.launch.py
@@ -39,6 +40,8 @@ autonomous_car_pkg/
 
 /scan ──► obstacle_avoidance ──► /behavior/state
                              ──► /obstacles/markers
+
+/camera_2/image_raw ──► sign_detection_node ──► /sign/detected
 
 /sign/detected ──► behavior_controller ──► /behavior/state
 
@@ -160,11 +163,13 @@ ros2 param set /navigation_node base_speed 0.10
 The `/sign/detected` topic accepts `String` messages with values:
 - `"stop"` → 5 s pause
 - `"road_closed"` → immediate turn-around
-- `"one_way"` → stop (don't traverse wrong way)
+- `"one_way"` / `"one_way_left"` / `"one_way_right"` → stop (don't traverse wrong way)
 
-To add sign recognition, create `sign_detection_node.py` that:
-1. Subscribes to `/camera/front/image_raw`.
-2. Uses a colour-based detector or a small YOLO model.
-3. Publishes a `std_msgs/String` to `/sign/detected`.
+The model file `best.pt` is now packaged with the ROS install and loaded by
+`sign_detection_node.py`. The detector uses Ultralytics YOLO at runtime, so you
+need `torch` and `ultralytics` in the same Python environment as ROS 2. By
+default the node listens on `/camera_2/image_raw`, but you can remap it with the
+`image_topic` parameter if your sign camera uses a different topic.
 
-The behavior_controller is already wired to receive these.
+The `behavior_controller` is already wired to receive these labels, and it now
+stops on any `one_way*` variant as a conservative safety fallback.

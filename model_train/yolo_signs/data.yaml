@@ -1,0 +1,8 @@
+path: /media/noah/Shared/Robotics/model/yolo_signs
+train: images/train
+val: images/val
+names:
+- road closed
+- stop
+- oneway
+- no sign

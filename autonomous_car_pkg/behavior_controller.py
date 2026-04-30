@@ -18,7 +18,7 @@ END_OF_ROAD     → turning around at orange line
 Subscriptions:
   /lane/end_of_road   (std_msgs/Bool)
   /obstacles/state    → via /behavior/state echo from obstacle_avoidance
-  /sign/detected      (std_msgs/String)  — stop | road_closed | one_way
+    /sign/detected      (std_msgs/String)  — stop | road_closed | one_way | one_way_left | one_way_right
 
 Publishes:
   /behavior/state     (std_msgs/String)
@@ -76,8 +76,8 @@ class BehaviorController(Node):
             self._transition('ROAD_CLOSED')
             self._publish_state('TURN_AROUND')
 
-        elif sign == 'one_way' and self.state == 'FOLLOWING':
-            self.get_logger().warn('One-way wrong direction → stopping')
+        elif sign.startswith('one_way') and self.state == 'FOLLOWING':
+            self.get_logger().warn(f'One-way sign detected ({sign}) → stopping')
             self._transition('ONE_WAY_WRONG')
             self._publish_state('STOP')
 

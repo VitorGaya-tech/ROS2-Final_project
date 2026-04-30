@@ -100,6 +100,13 @@ def generate_launch_description():
         output='screen',
     )
 
+    sign_detection = Node(
+        package='autonomous_car_pkg',
+        executable='sign_detection_node',
+        name='sign_detection_node',
+        output='screen',
+    )
+
     # ── RViz (optional) ───────────────────────────────────────────
     rviz_config = PathJoinSubstitution([pkg, 'config', 'autonomous_car.rviz'])
     rviz = Node(package='rviz2', executable='rviz2', name='rviz2', arguments=['-d', rviz_config], condition=IfCondition(LaunchConfiguration('use_rviz')))
@@ -112,5 +119,6 @@ def generate_launch_description():
         navigation,
         obstacle_avoidance,
         behavior,
+        sign_detection,
         rviz,
     ])

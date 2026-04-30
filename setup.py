@@ -11,7 +11,7 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
-        ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name, ['package.xml', 'best.pt']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
         (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
     ],
@@ -29,6 +29,7 @@ setup(
             'behavior_controller   = autonomous_car_pkg.behavior_controller:main',
             'lane_map_node         = autonomous_car_pkg.lane_map_node:main',
             'obstacle_avoidance    = autonomous_car_pkg.obstacle_avoidance:main',
+            'sign_detection_node   = autonomous_car_pkg.sign_detection_node:main',
         ],
     },
 )
