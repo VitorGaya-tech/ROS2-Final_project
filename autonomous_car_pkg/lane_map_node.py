@@ -1,30 +1,11 @@
 """
 lane_map_node.py
 ----------------
-Takes the lane markers from lane_detection_node and re-publishes them in the
-/map frame (using TF to transform from base_link → map).
-
-This allows RViz to accumulate a "painted" map of where lane lines have
-been seen throughout the run — satisfying the mapping requirement.
-
-Subscriptions:
-  /lane/markers       (visualization_msgs/MarkerArray)  — in base_link frame
-
-Publishes:
-  /lane_map/markers   (visualization_msgs/MarkerArray)  — white + yellow trails in map frame
-  /lane_map/path      (nav_msgs/Path)                   — trajectory of white line
-
-Marker IDs from lane_detection_node:
-  id=0 → white line
-  id=1 → yellow line
-  id=2 → orange (ignored here, not mapped)
-
-Each colour has its own independent LINE_STRIP so they never draw a
-connecting segment between a white point and a yellow point.
+Toma los segmentos de línea de lane_detection_node y los republica en el
+frame /map (usando TF para transformar de base_link → map).
 """
 
 import math
-
 import rclpy
 from rclpy.node import Node
 from visualization_msgs.msg import Marker, MarkerArray
@@ -33,15 +14,15 @@ from geometry_msgs.msg import PoseStamped, Point
 
 try:
     from tf2_ros import Buffer, TransformListener
-    import tf2_geometry_msgs  # noqa: needed for do_transform_point
+    from tf2_ros import LookupException, ConnectivityException, ExtrapolationException
+    import tf2_geometry_msgs  # noqa
     TF_AVAILABLE = True
 except ImportError:
     TF_AVAILABLE = False
 
 
-MAX_MARKERS   = 2000   # max stored waypoints per trail
-DEDUPE_DIST   = 0.10   # metres — skip if last point is closer than this
-SMOOTH_WINDOW = 5      # points averaged for display (raw data unchanged)
+MAX_MARKERS   = 2000   # max stored waypoints per trail (en puntos, es decir, 1000 segmentos)
+DEDUPE_DIST   = 0.10   # metros — saltar si el segmento es casi idéntico al anterior
 
 
 class LaneMapNode(Node):
@@ -56,17 +37,15 @@ class LaneMapNode(Node):
             self.tf_buffer   = Buffer()
             self.tf_listener = TransformListener(self.tf_buffer, self)
         else:
-            self.get_logger().warn('tf2 not available — using base_link frame directly')
+            self.get_logger().warn('tf2 no está disponible. No se puede mapear globalmente.')
 
-        self.create_subscription(
-            MarkerArray, '/lane/markers', self._markers_cb, 10)
+        self.create_subscription(MarkerArray, '/lane/markers', self._markers_cb, 10)
 
         self.pub_markers = self.create_publisher(MarkerArray, '/lane_map/markers', 10)
         self.pub_path    = self.create_publisher(Path,        '/lane_map/path',    10)
 
         self.create_timer(0.5, self._republish_map)
-
-        self.get_logger().info('Lane map node started.')
+        self.get_logger().info('Lane map node started (Segment Mode).')
 
     # ── Incoming marker callback ───────────────────────────────────
     def _markers_cb(self, msg: MarkerArray):
@@ -76,34 +55,43 @@ class LaneMapNode(Node):
             if m.id not in (0, 1):   # 0=white, 1=yellow; skip orange (2)
                 continue
 
-            point_map = self._to_map_frame(m)
-            if point_map is None:
-                continue
+            # Ahora esperamos recibir LINE_LIST con al menos 2 puntos (un segmento)
+            if m.type == Marker.LINE_LIST and len(m.points) >= 2:
+                p1_local = m.points[0]
+                p2_local = m.points[1]
 
-            trail = self.white_trail if m.id == 0 else self.yellow_trail
-            self._append_deduped(trail, point_map)
+                p1_map = self._to_map_frame_point(p1_local)
+                p2_map = self._to_map_frame_point(p2_local)
 
-    def _append_deduped(self, trail: list, pt: Point):
-        if trail:
-            last = trail[-1]
-            dx = pt.x - last.x
-            dy = pt.y - last.y
+                if p1_map is None or p2_map is None:
+                    continue # El SLAM falló en este instante, ignoramos
+
+                trail = self.white_trail if m.id == 0 else self.yellow_trail
+                self._append_segment_deduped(trail, p1_map, p2_map)
+
+    def _append_segment_deduped(self, trail: list, p1: Point, p2: Point):
+        # Comprobar si el inicio de este segmento está muy cerca del anterior
+        if len(trail) >= 2:
+            last_p1 = trail[-2]
+            dx = p1.x - last_p1.x
+            dy = p1.y - last_p1.y
             if (dx * dx + dy * dy) < DEDUPE_DIST ** 2:
-                return
-        trail.append(pt)
-        if len(trail) > MAX_MARKERS:
+                return # Segmento redundante, lo ignoramos
+
+        # Añadimos ambos puntos al trail
+        trail.append(p1)
+        trail.append(p2)
+
+        # Mantenemos el límite borrando de 2 en 2 (para no romper segmentos)
+        while len(trail) > MAX_MARKERS:
+            trail.pop(0)
             trail.pop(0)
 
-    # ── TF helper ─────────────────────────────────────────────────
-    def _to_map_frame(self, marker: Marker):
-        """Transform marker pose from base_link to map. Falls back to base_link."""
-        p = Point()
-        p.x = marker.pose.position.x
-        p.y = marker.pose.position.y
-        p.z = 0.0
-
+    # ── TF helper (ahora procesa Points directos) ─────────────────
+    def _to_map_frame_point(self, p_local: Point):
+        """Transform local point from base_link to map."""
         if not TF_AVAILABLE:
-            return p
+            return None
 
         try:
             transform = self.tf_buffer.lookup_transform(
@@ -114,37 +102,22 @@ class LaneMapNode(Node):
             tx = transform.transform.translation.x
             ty = transform.transform.translation.y
             q  = transform.transform.rotation
+            
             siny = 2.0 * (q.w * q.z + q.x * q.y)
             cosy = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
             yaw  = math.atan2(siny, cosy)
 
             p_map = Point()
-            p_map.x = tx + p.x * math.cos(yaw) - p.y * math.sin(yaw)
-            p_map.y = ty + p.x * math.sin(yaw) + p.y * math.cos(yaw)
+            p_map.x = tx + p_local.x * math.cos(yaw) - p_local.y * math.sin(yaw)
+            p_map.y = ty + p_local.x * math.sin(yaw) + p_local.y * math.cos(yaw)
             p_map.z = 0.0
             return p_map
 
-        except Exception:
-            # TF not yet available (SLAM still initialising)
-            return p
-
-    # ── Smoothing helper ──────────────────────────────────────────
-    def _smooth(self, trail: list) -> list:
-        n = len(trail)
-        if n < SMOOTH_WINDOW:
-            return list(trail)
-        half = SMOOTH_WINDOW // 2
-        result = []
-        for i in range(n):
-            lo = max(0, i - half)
-            hi = min(n, i + half + 1)
-            pts = trail[lo:hi]
-            p = Point()
-            p.x = sum(pt.x for pt in pts) / len(pts)
-            p.y = sum(pt.y for pt in pts) / len(pts)
-            p.z = 0.0
-            result.append(p)
-        return result
+        except (LookupException, ConnectivityException, ExtrapolationException):
+            return None
+        except Exception as e:
+            self.get_logger().debug(f'Error inesperado de TF: {e}')
+            return None
 
     # ── Periodic republish ─────────────────────────────────────────
     def _republish_map(self):
@@ -154,15 +127,15 @@ class LaneMapNode(Node):
         stamp = self.get_clock().now().to_msg()
         arr   = MarkerArray()
 
-        def make_strip(trail, mid, r, g, b):
+        def make_line_list(trail, mid, r, g, b):
             m = Marker()
             m.header.frame_id = 'map'
             m.header.stamp    = stamp
             m.ns      = 'lane_map'
             m.id      = mid
-            m.type    = Marker.LINE_STRIP
+            m.type    = Marker.LINE_LIST # Dibujará segmentos independientes
             m.action  = Marker.ADD
-            m.scale.x = 0.02
+            m.scale.x = 0.02 # Grosor de la línea
             m.color.r = r
             m.color.g = g
             m.color.b = b
@@ -171,23 +144,33 @@ class LaneMapNode(Node):
             return m
 
         if self.white_trail:
-            arr.markers.append(make_strip(self._smooth(self.white_trail),  0, 1.0, 1.0, 1.0))
+            arr.markers.append(make_line_list(self.white_trail,  0, 1.0, 1.0, 1.0))
         if self.yellow_trail:
-            arr.markers.append(make_strip(self._smooth(self.yellow_trail), 1, 1.0, 0.9, 0.0))
+            arr.markers.append(make_line_list(self.yellow_trail, 1, 1.0, 0.9, 0.0))
 
         self.pub_markers.publish(arr)
 
-        # Path uses white trail (primary navigation reference)
+        # Path para navegación usando el centro de los segmentos blancos
         if self.white_trail:
             path = Path()
             path.header.frame_id = 'map'
             path.header.stamp    = stamp
-            for pt in self._smooth(self.white_trail):
+            # Iteramos de 2 en 2 para sacar el centro de cada segmento
+            for i in range(0, len(self.white_trail) - 1, 2):
+                p1 = self.white_trail[i]
+                p2 = self.white_trail[i+1]
+                
+                mid_p = Point()
+                mid_p.x = (p1.x + p2.x) / 2.0
+                mid_p.y = (p1.y + p2.y) / 2.0
+                mid_p.z = 0.0
+
                 ps = PoseStamped()
                 ps.header = path.header
-                ps.pose.position = pt
+                ps.pose.position = mid_p
                 ps.pose.orientation.w = 1.0
                 path.poses.append(ps)
+                
             self.pub_path.publish(path)
 
 
