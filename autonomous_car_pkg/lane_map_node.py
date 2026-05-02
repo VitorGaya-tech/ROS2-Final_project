@@ -42,7 +42,7 @@ class LaneMapNode(Node):
         self.pub_path    = self.create_publisher(Path,        '/lane_map/path',    10)
 
         self.create_timer(0.5, self._republish_map)
-        self.get_logger().info('Lane map node started (Breadcrumb Mode).')
+        self.get_logger().info('Lane map node started (Breadcrumb Mode con frame odom).')
 
     def _markers_cb(self, msg: MarkerArray):
         for m in msg.markers:
@@ -53,13 +53,13 @@ class LaneMapNode(Node):
             if m.type == Marker.LINE_LIST and len(m.points) >= 2:
                 p1_local = m.points[0] # Este es el punto que está pegado al coche
 
-                p1_map = self._to_map_frame_point(p1_local)
+                p1_odom = self._to_odom_frame_point(p1_local)
 
-                if p1_map is None:
+                if p1_odom is None:
                     continue # Ignorar si falla la odometría (TF)
 
                 trail = self.white_trail if m.id == 0 else self.yellow_trail
-                self._append_point_deduped(trail, p1_map)
+                self._append_point_deduped(trail, p1_odom)
 
     def _append_point_deduped(self, trail: list, p: Point):
         # Evitar guardar puntos en el mismo sitio si el robot está parado
@@ -75,13 +75,14 @@ class LaneMapNode(Node):
         if len(trail) > MAX_MARKERS:
             trail.pop(0) # Borramos los más viejos si llegamos al límite
 
-    def _to_map_frame_point(self, p_local: Point):
+    def _to_odom_frame_point(self, p_local: Point):
         if not TF_AVAILABLE:
             return None
 
         try:
+            # CAMBIO: Usamos 'odom' como referencia base
             transform = self.tf_buffer.lookup_transform(
-                'map', 'base_link',
+                'odom', 'base_link',
                 rclpy.time.Time(),
                 timeout=rclpy.duration.Duration(seconds=0.05))
 
@@ -93,11 +94,11 @@ class LaneMapNode(Node):
             cosy = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
             yaw  = math.atan2(siny, cosy)
 
-            p_map = Point()
-            p_map.x = tx + p_local.x * math.cos(yaw) - p_local.y * math.sin(yaw)
-            p_map.y = ty + p_local.x * math.sin(yaw) + p_local.y * math.cos(yaw)
-            p_map.z = 0.0
-            return p_map
+            p_odom = Point()
+            p_odom.x = tx + p_local.x * math.cos(yaw) - p_local.y * math.sin(yaw)
+            p_odom.y = ty + p_local.x * math.sin(yaw) + p_local.y * math.cos(yaw)
+            p_odom.z = 0.0
+            return p_odom
 
         except (LookupException, ConnectivityException, ExtrapolationException):
             return None
@@ -109,16 +110,16 @@ class LaneMapNode(Node):
         stamp = self.get_clock().now().to_msg()
         arr   = MarkerArray()
 
-        # En lugar de líneas sueltas, dibujamos PUNTOS (Miguitas)
         def make_points_marker(trail, mid, r, g, b):
             m = Marker()
-            m.header.frame_id = 'map'
+            # CAMBIO: Publicamos los puntos en 'odom'
+            m.header.frame_id = 'odom'
             m.header.stamp    = stamp
             m.ns      = 'lane_map'
             m.id      = mid
-            m.type    = Marker.POINTS # Clave: Dibujamos puntos como un rotulador
+            m.type    = Marker.POINTS 
             m.action  = Marker.ADD
-            m.scale.x = 0.04 # Tamaño del punto
+            m.scale.x = 0.04 
             m.scale.y = 0.04
             m.color.r = r; m.color.g = g; m.color.b = b; m.color.a = 1.0
             m.points  = list(trail)
@@ -130,3 +131,18 @@ class LaneMapNode(Node):
             arr.markers.append(make_points_marker(self.yellow_trail, 1, 1.0, 0.9, 0.0))
 
         self.pub_markers.publish(arr)
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = LaneMapNode()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
