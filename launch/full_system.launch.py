@@ -109,8 +109,8 @@ def generate_launch_description():
         slam_launch,      # <--- Substituímos o slam_node por slam_launch
         lane_detection,
         lane_map,
-        navigation,
+        #navigation,
         obstacle_avoidance,
         behavior,
         rviz,
-    ])
+    )
