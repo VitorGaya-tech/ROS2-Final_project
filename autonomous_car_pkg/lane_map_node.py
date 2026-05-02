@@ -2,29 +2,13 @@
 lane_map_node.py
 ----------------
 Takes the lane markers from lane_detection_node and re-publishes them in the
-/map frame (using TF to transform from base_link → map).
+/odom frame (using TF to transform from base_link → odom).
 
 This allows RViz to accumulate a "painted" map of where lane lines have
 been seen throughout the run — satisfying the mapping requirement.
-
-Subscriptions:
-  /lane/markers       (visualization_msgs/MarkerArray)  — in base_link frame
-
-Publishes:
-  /lane_map/markers   (visualization_msgs/MarkerArray)  — white + yellow trails in map frame
-  /lane_map/path      (nav_msgs/Path)                   — trajectory of white line
-
-Marker IDs from lane_detection_node:
-  id=0 → white line
-  id=1 → yellow line
-  id=2 → orange (ignored here, not mapped)
-
-Each colour has its own independent LINE_STRIP so they never draw a
-connecting segment between a white point and a yellow point.
 """
 
 import math
-
 import rclpy
 from rclpy.node import Node
 from visualization_msgs.msg import Marker, MarkerArray
@@ -66,7 +50,7 @@ class LaneMapNode(Node):
 
         self.create_timer(0.5, self._republish_map)
 
-        self.get_logger().info('Lane map node started.')
+        self.get_logger().info('Lane map node started using ODOM frame.')
 
     # ── Incoming marker callback ───────────────────────────────────
     def _markers_cb(self, msg: MarkerArray):
@@ -96,7 +80,7 @@ class LaneMapNode(Node):
 
     # ── TF helper ─────────────────────────────────────────────────
     def _to_map_frame(self, marker: Marker):
-        """Transform marker pose from base_link to map. Falls back to base_link."""
+        """Transform marker pose from base_link to odom. Falls back to base_link."""
         p = Point()
         p.x = marker.pose.position.x
         p.y = marker.pose.position.y
@@ -106,8 +90,9 @@ class LaneMapNode(Node):
             return p
 
         try:
+            # CAMBIADO: 'map' por 'odom'
             transform = self.tf_buffer.lookup_transform(
-                'map', 'base_link',
+                'odom', 'base_link',
                 rclpy.time.Time(),
                 timeout=rclpy.duration.Duration(seconds=0.05))
 
@@ -125,7 +110,6 @@ class LaneMapNode(Node):
             return p_map
 
         except Exception:
-            # TF not yet available (SLAM still initialising)
             return p
 
     # ── Smoothing helper ──────────────────────────────────────────
@@ -156,7 +140,7 @@ class LaneMapNode(Node):
 
         def make_strip(trail, mid, r, g, b):
             m = Marker()
-            m.header.frame_id = 'map'
+            m.header.frame_id = 'odom'  # CAMBIADO: 'map' por 'odom'
             m.header.stamp    = stamp
             m.ns      = 'lane_map'
             m.id      = mid
@@ -177,10 +161,9 @@ class LaneMapNode(Node):
 
         self.pub_markers.publish(arr)
 
-        # Path uses white trail (primary navigation reference)
         if self.white_trail:
             path = Path()
-            path.header.frame_id = 'map'
+            path.header.frame_id = 'odom'  # CAMBIADO: 'map' por 'odom'
             path.header.stamp    = stamp
             for pt in self._smooth(self.white_trail):
                 ps = PoseStamped()
