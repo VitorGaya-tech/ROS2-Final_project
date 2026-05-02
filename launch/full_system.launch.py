@@ -68,7 +68,7 @@ def generate_launch_description():
         name='lane_map_node',
         output='screen',
     )
-
+    """"
     navigation = Node(
         package='autonomous_car_pkg',
         executable='navigation_node',
@@ -81,7 +81,7 @@ def generate_launch_description():
             'max_turn': 1.2,
         }],
     )
-
+    """
     obstacle_avoidance = Node(
         package='autonomous_car_pkg',
         executable='obstacle_avoidance',
@@ -109,7 +109,7 @@ def generate_launch_description():
         slam_launch,      # <--- Substituímos o slam_node por slam_launch
         lane_detection,
         lane_map,
-        navigation,
+        #navigation,
         obstacle_avoidance,
         behavior,
         rviz,
